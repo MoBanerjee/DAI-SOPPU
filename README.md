@@ -1,125 +1,80 @@
 
 # SOPPU: Scalable One PEFT per User
 
-SOPPU is a framework for decentralized, personalized AI that enables efficient management of individual user adaptations. It combines:
-- Federated training from [FedBiOT](https://github.com/HarliWu/FedBiOT)
-- Adapter compression (our contribution)
-- Dynamic serving from [LoRAX](https://github.com/predibase/lorax)
+SOPPU is a framework that enables efficient compression and serving of personalized LoRA adapters for Large Language Models. It combines client-side compression with scalable serving through LoRAX.
 
-## Quick Start
+## Overview
 
-### Installation
-```bash
-pip install torch numpy safetensors
-```
+SOPPU achieves:
+- 1.99x compression ratio (1.7M to 856K parameters)
+- 49.7% memory savings across adapters 
+- Efficient serving of thousands of concurrent personal adapters
 
-### Basic Usage
+### Key Components
 
-```python
-import numpy as np
-import torch
-from safetensors import safe_open
-from safetensors.torch import save_file
+1. **Client-side Compression**
+   - Compresses personal LoRA adapters locally
+   - Uses joint diagonalization for efficient compression
+   - Preserves adapter functionality while reducing size
 
-def compress_lora_adapters(adapters, target_rank=32, max_iter=100):
-    """Compress LoRA adapters using joint diagonalization.
-    
-    Args:
-        adapters: Dict of adapter name to (A, B) matrices
-        target_rank: Target rank for compression (default: 32)
-        max_iter: Number of iterations (default: 100)
-        
-    Returns:
-        Dict of adapter name to (U, Sigma, V) compressed representation
-    """
-    # Group adapters by shape
-    grouped = {}
-    for name, (A, B) in adapters.items():
-        shape_key = (A.shape, B.shape)
-        if shape_key not in grouped:
-            grouped[shape_key] = {}
-        grouped[shape_key][name] = (A, B)
+2. **Server-side Serving** 
+   - Leverages LoRAX for dynamic adapter management
+   - Efficient batching and memory optimization
+   - Scalable inference serving
 
-    compressed = {}
-    for group in grouped.values():
-        As, Bs = zip(*group.values())
-        m, k = Bs[0].shape
-        n = As[0].shape[1]
-        r = min(target_rank, k, m, n)
 
-        # Initialize random orthogonal matrices
-        U = np.random.randn(m, r)
-        V = np.random.randn(n, r)
-        U, _ = np.linalg.qr(U)
-        V, _ = np.linalg.qr(V)
+## Compression Analysis
 
-        # Alternating optimization
-        for _ in range(max_iter):
-            # Update U
-            M = sum(B @ A @ V @ V.T @ A.T @ B.T for A, B in zip(As, Bs))
-            U, _ = np.linalg.qr(M @ U)
+Our evaluation demonstrates the effectiveness of adapter compression across different layers:
 
-            # Update V
-            N = sum(A.T @ B.T @ U @ U.T @ B @ A for A, B in zip(As, Bs))
-            V, _ = np.linalg.qr(N @ V)
+### Reconstruction Error Analysis
+![Reconstruction Error](compression_analysis/reconstruction_errors.png)
+*Layer-wise reconstruction errors showing mean errors (blue bars) and individual samples (dots). Early layers show better preservation while query projections consistently show higher errors than value projections.*
 
-        # Compute adapter-specific coefficients
-        for i, name in enumerate(group.keys()):
-            Sigma = U.T @ Bs[i] @ As[i] @ V
-            compressed[name] = (U, Sigma, V.T)
+Key findings:
+- Early layers (0-5): 30-50 mean error range
+- Middle layers (6-10): 40-60 mean error range
+- Later layers (11-15): 60-80 mean error range
+- Standard deviations approximately 1.7x the mean errors
 
-    return compressed
-
-# Example usage
-if __name__ == "__main__":
-    # Load your LoRA adapters
-    adapters = {}  # Load your adapters here
-    
-    # Compress adapters
-    compressed = compress_lora_adapters(adapters)
-    
-    # Save compressed adapters
-    tensors = {}
-    for name, (U, S, V) in compressed.items():
-        tensors[f"{name}_U"] = torch.from_numpy(U).contiguous()
-        tensors[f"{name}_S"] = torch.from_numpy(S).contiguous()
-        tensors[f"{name}_V"] = torch.from_numpy(V).contiguous()
-    
-    save_file(tensors, "compressed_adapters.safetensors")
-```
+### Memory and Parameter Distribution
+![Parameter Distribution](compression_analysis/params_comparison.png)
+*Distribution of parameters between original and compressed adapters showing 49.7% memory savings.*
 
 ## Architecture
 
-SOPPU consists of three main components:
+### Client Side
+- Adapter compression using joint diagonalization
+- Local verification of compression quality
+- Secure storage using safetensors
 
-1. **FedBiOT Integration** [GitHub](https://github.com/HarliWu/FedBiOT)
-   - Federated learning without full model access
-   - Privacy-preserving personalization
-   - Client-side LoRA training
+### Server Side
+- Integration with LoRAX server
+- Dynamic adapter loading/unloading
+- Efficient batched inference
+- Optimized GPU memory management
 
-2. **Compression (Our Contribution)**
-   - Joint diagonalization of LoRA adapters
-   - Shared basis optimization
-   - Memory-efficient storage
+## Contributing
 
-3. **LoRAX Integration** [GitHub](https://github.com/predibase/lorax)
-   - Dynamic adapter loading
-   - Efficient request batching
-   - Memory management
-
-## How It Works
-
-1. **Training**: Users train personal LoRA adapters using FedBiOT
-2. **Compression**: Adapters are compressed using joint diagonalization
-3. **Serving**: Compressed adapters are served efficiently using LoRAX
-
-## References
-
-1. FedBiOT: [FedBiOT: LLM Local Fine-tuning in Federated Learning without Full Model](https://github.com/HarliWu/FedBiOT)
-2. LoRAX: [LoRAX: Serving Thousands of Concurrent LoRA Adapters](https://github.com/predibase/lorax)
+Contributions welcome! Please read the contributing guidelines before submitting PRs.
 
 <!-- ## Citation
+
+If you use SOPPU in your research, please cite:
+
 ```bibtex
-[Will be added after publication]
+@article{soppu2024,
+  title={SOPPU: Scalable One PEFT per User},
+  author={Jain, Yash and Banerjee, Mohor},
+  year={2024}
+}
 ```
-``` -->
+
+## License
+
+[Your chosen license] -->
+
+## Contact
+
+- Yash Jain - yash012@e.ntu.edu.sg
+- Mohor Banerjee - mohor001@e.ntu.edu.sg
