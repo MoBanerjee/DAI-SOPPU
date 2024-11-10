@@ -1,7 +1,10 @@
-
 # SOPPU: Scalable One PEFT per User
 
 SOPPU is a framework that enables efficient compression and serving of personalized LoRA adapters for Large Language Models. It combines client-side compression with scalable serving through LoRAX.
+
+🎉 **Update**: Our paper has been accepted to DAI 2024 (International Conference on Distributed Artificial Intelligence)! Preprint will be available soon.
+
+> ⚠️ **Note**: We are actively working on releasing the complete pipeline. Stay tuned for updates!
 
 ## Overview
 
@@ -13,7 +16,7 @@ SOPPU achieves:
 ### Key Components
 
 1. **Client-side Compression**
-   - Compresses personal LoRA adapters locally
+   - Compresses single or multiple LoRA adapters into one unified representation
    - Uses joint diagonalization for efficient compression
    - Preserves adapter functionality while reducing size
 
@@ -54,25 +57,11 @@ Key findings:
 - Efficient batched inference
 - Optimized GPU memory management
 
-## Contributing
-
-Contributions welcome! Please read the contributing guidelines before submitting PRs.
-
-<!-- ## Citation
-
-If you use SOPPU in your research, please cite:
-
-```bibtex
-@article{soppu2024,
-  title={SOPPU: Scalable One PEFT per User},
-  author={Jain, Yash and Banerjee, Mohor},
-  year={2024}
-}
-```
-
-## License
-
-[Your chosen license] -->
+## Coming Soon
+- Complete implementation with example usage
+- Pre-trained adapter examples
+- Integration guide with LoRAX
+- Paper preprint
 
 ## Contact
 
