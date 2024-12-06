@@ -194,6 +194,79 @@ def save_compressed_adapters(compressed: Dict[str, Tuple[np.ndarray, np.ndarray,
         logger.error(f"Error saving compressed adapters: {str(e)}")
         raise
 
+def reconstruct_adapter_from_compressed_file(
+    compressed_file: str,
+    target_file: str,
+    output_file: str
+):
+
+    logger.info(f"Loading compressed file: {compressed_file}")
+    with safe_open(compressed_file, framework="pt") as f:
+        keys = list(f.keys())
+        logger.info(f"Found {len(keys)} keys in compressed file")
+
+        # Group keys by layer and component
+        layer_groups = {}
+        for key in keys:
+            match = re.match(
+                r'base_model\.model\.model\.layers\.(\d+)\.self_attn\.(\w+)_proj\.compressed_(\w+)\.weight',
+                key
+            )
+            if match:
+                layer_idx = match.group(1)
+                proj_type = match.group(2)
+                component_type = match.group(3)
+
+                layer_name = f"layer_{layer_idx}_{proj_type}_proj"
+                if layer_name not in layer_groups:
+                    layer_groups[layer_name] = {'U': None, 'V': None, 'S': {}}
+
+                if component_type == 'U':
+                    layer_groups[layer_name]['U'] = f.get_tensor(key)
+                elif component_type == 'V':
+                    layer_groups[layer_name]['V'] = f.get_tensor(key)
+                elif component_type.startswith('S_'):
+                    file_name = component_type[2:]  # Extract file identifier
+                    layer_groups[layer_name]['S'][file_name] = f.get_tensor(key)
+
+    logger.info("Grouping complete. Reconstructing target file layers.")
+    tensors = {}
+
+    for layer_name, components in layer_groups.items():
+        U = components['U']
+        V = components['V']
+        Sigmas = components['S']
+
+        for file_name, S in Sigmas.items():
+            if file_name == target_file:
+                # Reconstruct A and B matrices
+                A_reconstructed = torch.matmul(V.T, S)
+                B_reconstructed = torch.matmul(U, S)
+
+                # Extract layer index and projection type
+                match = re.match(r'layer_(\d+)_(\w+)_proj', layer_name)
+                if match:
+                    layer_idx = match.group(1)
+                    proj_type = match.group(2)
+                    base_key = f"base_model.model.model.layers.{layer_idx}.self_attn.{proj_type}_proj"
+
+                    # Save A and B with original key names
+                    tensors[f"{base_key}.lora_A.weight"] = A_reconstructed.contiguous().float()
+                    tensors[f"{base_key}.lora_B.weight"] = B_reconstructed.contiguous().float()
+                    logger.info(f"Reconstructed layer {layer_name}: A shape {A_reconstructed.shape}, B shape {B_reconstructed.shape}")
+
+    if not tensors:
+        logger.warning(f"No layers found for target file: {target_file}. No reconstruction performed.")
+        return
+
+    logger.info(f"Saving reconstructed adapter file to {output_file}")
+    try:
+        save_file(tensors, output_file)
+        logger.info(f"Successfully saved reconstructed adapter file to {output_file}")
+    except Exception as e:
+        logger.error(f"Error saving reconstructed adapters: {str(e)}")
+        raise
+
 
 def main():
     # List of input adapter files to compress together
@@ -226,7 +299,7 @@ def main():
             logger.info(f"Successfully compressed and saved merged adapters to {output_file}")
         else:
             logger.warning("No adapters were successfully compressed")
-            
+        reconstruct_adapter_from_compressed_file(output_file,"adapter_model.safetensors","adapter_model_new.safetensors")
     except Exception as e:
         logger.error(f"Error during compression process: {str(e)}")
         raise
