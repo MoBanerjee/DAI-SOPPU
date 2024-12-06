@@ -77,14 +77,14 @@ def get_unique_layer_names(adapters_dict: Dict[str, Dict[str, Tuple[np.ndarray, 
     logger.info(f"Found unique layer names: {layer_names}")
     return layer_names
 
-def group_adapters_by_layer(adapters_dict: Dict[str, Dict[str, Tuple[np.ndarray, np.ndarray]]]) -> Dict[str, List[Tuple[np.ndarray, np.ndarray]]]:
+def group_adapters_by_layer(adapters_dict: Dict[str, Dict[str, Tuple[np.ndarray, np.ndarray]]]) -> Dict[str, List[Tuple[np.ndarray, np.ndarray,str]]]:
     """Group adapters by layer name across all files."""
     layer_names = get_unique_layer_names(adapters_dict)
     grouped = {name: [] for name in layer_names}
     
     for file_path, adapters in adapters_dict.items():
         for name, (A, B) in adapters.items():
-            grouped[name].append((A, B))
+            grouped[name].append((A, B,file_path))
             logger.info(f"Added adapter pair for {name} from {file_path}")
     
     return grouped
@@ -130,7 +130,7 @@ def joint_diagonalization_full(As: List[np.ndarray], Bs: List[np.ndarray], r: in
     
     return U, V, Sigmas
 
-def compress_merged_adapters(adapters_dict: Dict[str, Dict[str, Tuple[np.ndarray, np.ndarray]]], r: int) -> Dict[str, Tuple[np.ndarray, np.ndarray, List[np.ndarray]]]:
+def compress_merged_adapters(adapters_dict: Dict[str, Dict[str, Tuple[np.ndarray, np.ndarray]]], r: int) -> Dict[str, Tuple[np.ndarray, np.ndarray, List[np.ndarray],List[str]]]:
     """Compress multiple adapters into shared basis vectors with individual Sigma matrices."""
     compressed = {}
     
@@ -145,7 +145,7 @@ def compress_merged_adapters(adapters_dict: Dict[str, Dict[str, Tuple[np.ndarray
             continue
             
         try:
-            As, Bs = zip(*adapter_pairs)
+            As, Bs, file_paths_in_order= zip(*adapter_pairs)
             
             if Bs[0].shape[1] != As[0].shape[0]:
                 logger.warning(f"Incompatible shapes for layer {layer_name}: {As[0].shape} and {Bs[0].shape}")
@@ -153,7 +153,7 @@ def compress_merged_adapters(adapters_dict: Dict[str, Dict[str, Tuple[np.ndarray
                 
             logger.info(f"Compressing layer {layer_name} with {len(adapter_pairs)} adapter pairs")
             U, V, Sigmas = joint_diagonalization_full(list(As), list(Bs), r)
-            compressed[layer_name] = (U, V.T, Sigmas)
+            compressed[layer_name] = (U, V.T, Sigmas,file_paths_in_order)
             logger.info(f"Successfully compressed layer {layer_name}")
             
         except Exception as e:
@@ -162,12 +162,12 @@ def compress_merged_adapters(adapters_dict: Dict[str, Dict[str, Tuple[np.ndarray
 
     return compressed
 
-def save_compressed_adapters(compressed: Dict[str, Tuple[np.ndarray, np.ndarray, List[np.ndarray]]], file_path: str):
+def save_compressed_adapters(compressed: Dict[str, Tuple[np.ndarray, np.ndarray, List[np.ndarray],List[str]]], file_path: str):
     """Save compressed adapters with layer structure."""
     tensors = {}
     logger.info("Preparing tensors for saving")
     
-    for name, (U, V, Sigmas) in compressed.items():
+    for name, (U, V, Sigmas,file_paths) in compressed.items():
         # Extract layer index and projection type from name
         match = re.match(r'layer_(\d+)_(\w+)_proj', name)
         if match:
@@ -182,8 +182,8 @@ def save_compressed_adapters(compressed: Dict[str, Tuple[np.ndarray, np.ndarray,
             tensors[f"{base_key}.compressed_V.weight"] = torch.from_numpy(V).contiguous().float()
             
             # Save individual Sigma matrices
-            for i, S in enumerate(Sigmas):
-                tensors[f"{base_key}.compressed_S_{i}.weight"] = torch.from_numpy(S).contiguous().float()
+            for file, S in zip(file_paths,Sigmas):
+                tensors[f"{base_key}.compressed_S_{file}.weight"] = torch.from_numpy(S).contiguous().float()
                 
             logger.info(f"Prepared tensors for {name}")
     
@@ -194,40 +194,6 @@ def save_compressed_adapters(compressed: Dict[str, Tuple[np.ndarray, np.ndarray,
         logger.error(f"Error saving compressed adapters: {str(e)}")
         raise
 
-def load_compressed_adapters(file_path: str) -> Dict[str, Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]]:
-    """Load compressed adapters with layer structure."""
-    compressed = {}
-    
-    with safe_open(file_path, framework="pt") as f:
-        keys = list(f.keys())
-        layer_groups = {}
-        
-        # Group keys by layer and projection type
-        for key in keys:
-            match = re.search(r'layers\.(\d+)\.self_attn\.(\w+)_proj\.compressed_(\w+)\.weight', key)
-            if match:
-                layer_idx = match.group(1)
-                proj_type = match.group(2)
-                comp_type = match.group(3)
-                
-                group_key = f"layer_{layer_idx}_{proj_type}_proj"
-                if group_key not in layer_groups:
-                    layer_groups[group_key] = {'U': None, 'V': None, 'S': []}
-                
-                tensor = f.get_tensor(key)
-                if comp_type == 'U':
-                    layer_groups[group_key]['U'] = tensor
-                elif comp_type == 'V':
-                    layer_groups[group_key]['V'] = tensor
-                elif comp_type.startswith('S_'):
-                    layer_groups[group_key]['S'].append(tensor)
-        
-        # Create compressed adapter entries
-        for name, group in layer_groups.items():
-            if group['U'] is not None and group['V'] is not None and group['S']:
-                compressed[name] = (group['U'], group['V'], sorted(group['S'], key=lambda x: int(x.shape[0])))
-    
-    return compressed
 
 def main():
     # List of input adapter files to compress together
@@ -255,7 +221,7 @@ def main():
         compressed = compress_merged_adapters(all_adapters, r_compress)
 
         if compressed:
-            output_file = "compressed_merged_adapters.safetensors"
+            output_file = "compressed_adapters.safetensors"
             save_compressed_adapters(compressed, output_file)
             logger.info(f"Successfully compressed and saved merged adapters to {output_file}")
         else:
